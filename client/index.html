@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>websocket</title>
+  <link rel="stylesheet" href="./index.css" />
+  <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.min.js"></script>
+</head>
+
+<body>
+  <div id="app">
+    <p class="title">深圳湾码农交流群</p>
+    <div class="chat-box">
+      <div class="list" v-for="(item, key) in dataList" :key="key">
+        <p class="time">{{ fmtDate(key) }}</p>
+        <div v-for="(chat, index) in item" :key="index">
+          <!-- 系统消息 -->
+          <div class="tip-box" v-if="chat.type === 0">
+            <p class="tip">{{ chat.content }}</p>
+          </div>
+
+          <!-- 自己 -->
+          <div class="self content" v-else-if="chat.userId === userId">
+            <img :src="chat.imgSrc" />
+            <div>
+              <span>{{ chat.userName }}</span>
+              <p>{{ chat.content }}</p>
+            </div>
+          </div>
+
+          <!-- 好友 -->
+          <div class="friend content" v-else-if="chat.userId !== userId">
+            <img :src="chat.imgSrc" />
+            <div>
+              <span>{{ chat.userName }}</span>
+              <p>{{ chat.content }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="action">
+      <input v-model="sendMsg" placeholder="请输入内容" />
+      <button @click="handleSend">发送</button>
+    </div>
+  </div>
+</body>
+<script>
+  const statusMap = {
+    CLOSE: 0,
+    SUCCESS: 1,
+    ERROR: 2,
+  }
+  const userTypeMap = {
+    SYSTEM: 0,
+    SELF: 1,
+    FRIEND: 2,
+  }
+
+  const app = new Vue({
+    el: '#app',
+    data() {
+      return {
+        userId: navigator.userAgent + new Date().valueOf(), // 用浏览器信息模拟当前用户 id
+        userName: navigator.userAgent,
+        dataList: {},
+        sendMsg: '',
+        lastTimeStamp: null,
+        webSocket: null,
+        status: statusMap.CLOSE
+      }
+    },
+    mounted() {
+      this.userName = this.getExploreName()
+      this.init()
+    },
+    methods: {
+      init() {
+        this.webSocket = new WebSocket('ws://localhost:8088')
+        this.webSocket.onopen = () => {
+          this.status = statusMap.SUCCESS
+          const initMsg = JSON.stringify({
+            type: 'init',
+            userId: this.userId,
+            userName: this.userName,
+          })
+          this.webSocket.send(initMsg)
+        }
+        this.webSocket.onclose = () => {
+          this.status = statusMap.CLOSE
+          alert('连接已关闭...')
+        }
+        this.webSocket.onerror = () => {
+          this.status = statusMap.ERROR
+        }
+        this.webSocket.onmessage = (event) => {
+          const msg = JSON.parse(event.data || '')
+          // 自己发出去的就不用接收了
+          if (msg['userId'] === this.userId) return
+
+          const time = new Date().getTime()
+          const obj = {
+            type: msg['type'] || 0,
+            content: msg['content'],
+            userName: msg['userName'],
+            imgSrc: './friend.png',
+          }
+          if (time - this.lastTimeStamp < 2 * 60 * 1000) {
+            const arr = this.dataList[this.lastTimeStamp] || []
+            arr.push(obj)
+            this.$set(this.dataList, this.lastTimeStamp, arr)
+          } else {
+            this.lastTimeStamp = time
+            this.$set(this.dataList, time, [obj])
+          }
+          console.log(this.dataList)
+          this.handleScroll()
+        }
+      },
+
+      handleSend() {
+        if (this.status !== statusMap.SUCCESS) {
+          return alert('失去链接，请刷新页面')
+        }
+        const msg = this.sendMsg
+        if (!msg) {
+          return alert('请输入聊天内容')
+        }
+
+        const time = new Date().getTime()
+        const chat = {
+          type: userTypeMap.SELF,
+          content: msg,
+          userId: this.userId,
+          userName: this.userName,
+          imgSrc: './self.png',
+        }
+        if (time - this.lastTimeStamp < 1 * 60 * 1000) {
+          const arr = this.dataList[this.lastTimeStamp] || []
+          arr.push(chat)
+          this.$set(this.dataList, this.lastTimeStamp, arr)
+          // this.dataList[this.lastTimeStamp].push(chat)
+        } else {
+          this.lastTimeStamp = time
+          this.$set(this.dataList, time, [chat])
+        }
+        this.webSocket.send(JSON.stringify(chat))
+
+        this.handleScroll()
+        this.sendMsg = ''
+      },
+
+      handleScroll() {
+        const dom = document.querySelector('.chat-box')
+        const clientHeight = dom.clientHeight
+        const scrollHeight = dom.scrollHeight
+        if (scrollHeight > clientHeight) {
+          this.$nextTick(() => {
+            dom.scrollTo({
+              top: scrollHeight,
+              behavior: 'smooth'
+            })
+          })
+        }
+      },
+
+      // 格式化日期时间
+      fmtDate(date) {
+        const now = new Date(parseFloat(date))
+        const year = now.getFullYear()
+        const month = now.getMonth() + 1
+        const day = now.getDate()
+        const hour = now.getHours()
+        const minute = now.getMinutes()
+        const second = now.getSeconds()
+
+        return`${year}-${month}-${day} ${hour}:${minute}:${second}`
+      },
+
+      // 获取浏览器名
+      getExploreName(){
+        const userAgent = navigator.userAgent
+        if (userAgent.includes('Opera') || userAgent.includes('OPR')) {
+          return 'Opera'
+        } else if (userAgent.includes('compatible') && userAgent.includes('MSIE')) {
+          return 'IE'
+        } else if (userAgent.includes('Edge') || userAgent.includes('Edg')) {
+          return 'Edge'
+        } else if (userAgent.includes('Firefox')) {
+          return 'Firefox'
+        } else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) {
+          return 'Safari'
+        } else if (userAgent.includes('Chrome') && userAgent.includes('Safari')) {
+          return 'Chrome'
+        } else if (!!window.ActiveXObject || 'ActiveXObject' in window) {
+          return 'IE>=11'
+        } else {
+          return 'Unkonwn'
+        }
+      }
+    },
+  })
+</script>
+</html>
